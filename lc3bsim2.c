@@ -413,17 +413,41 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
    *       -Execute
    *       -Update NEXT_LATCHES
    */   
+
+  //fetch
   int ii = CURRENT_LATCHES.PC >> 1; //bc memory is word addressable BUT PC IS BYTE ADDRESSABLE, we need to shift right by 1 to get the word address
   int instr = 0; 
   // little endian!! 0 = lsb 1 = msb
   instr = ((MEMORY[ii][1] & 0xFF) << 8)| (MEMORY[ii][0] & 0xFF); // puts together a 16 bit instruction = hex 4 digit
 
+  //decode
+  int arg1;
+  int arg2;
+  int arg3;
+  decode_instr(instr, &arg1, &arg2, &arg3); // decode the instruction into assembly instructions and arguments
+
+  // execute
+
+
+
+
+    
+   //update
+  
+
+
+}
+
+
+
+
+void decode_instr(int instr, int *real_arg1, int *real_arg2, int *real_arg3){
   ///decode: from machine code to assembly instructions
   int opcode = instr & 0x0F000; 
-  int arg1 = 0; 
-  int arg2 = 0; 
-  int arg3 = 0; // at most 3 arguments 
-  
+  int arg1 = 0;
+  int arg2 = 0;
+  int arg3 = 0;
+ 
   switch(opcode){
     case 1: // add
       if ((instr & 0x0020) == 0){ // if bit 5 is 0, then we are using register mode
@@ -523,11 +547,8 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
       break;
 
   }
-
-
-
-
-    
-   
-
+  *real_arg1 = arg1;
+  *real_arg2 = arg2;
+  *real_arg3 = arg3;
+  return; 
 }
