@@ -402,7 +402,30 @@ int main(int argc, char *argv[]) {
 
 /***************************************************************/
 
+#define Low16bits(x) ((x) & 0xFFFF)
 
+void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3);
+
+int SEXT5(int val);
+int SEXT6(int val);
+int SEXT9(int val);
+int SEXT11(int val);
+void update_cc(int val);
+
+void execute_add(int instr, int arg1, int arg2, int arg3);
+void execute_and(int instr, int arg1, int arg2, int arg3);
+void execute_not(int arg1, int arg2);
+void execute_xor(int arg1, int arg2, int arg3);
+void execute_shift(int instr, int arg1, int arg2, int amount);
+void execute_branch(int condition_mask, int offset);
+void execute_jump(int base_register);
+void execute_jsr(int instr, int base_register_or_offset);
+void execute_ldb(int destination, int base_register, int offset);
+void execute_ldw(int destination, int base_register, int offset);
+void execute_stb(int source, int base_register, int offset);
+void execute_stw(int source, int base_register, int offset);
+void execute_lea(int destination, int offset);
+void execute_trap(int trap_vector);
 
 void process_instruction(){ // runs once every cycle, runs per new instruction
   /*  function: process_instruction
@@ -416,6 +439,9 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
 
   //fetch
   int ii = CURRENT_LATCHES.PC >> 1; //bc memory is word addressable BUT PC IS BYTE ADDRESSABLE, we need to shift right by 1 to get the word address
+  // pc incremented in fetch stage
+  NEXT_LATCHES.PC = CURRENT_LATCHES.PC + 2; 
+
   int instr = 0; 
   // little endian!! 0 = lsb 1 = msb
   instr = ((MEMORY[ii][1] & 0xFF) << 8)| (MEMORY[ii][0] & 0xFF); // puts together a 16 bit instruction = hex 4 digit
@@ -424,15 +450,44 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
   int arg1;
   int arg2;
   int arg3;
+  int flag; // used for two types of and etc
   int opcode = (instr >> 12) & 0xF;
-  decode_instr(instr, opcode, &arg1, &arg2, &arg3); // decode the instruction into assembly instructions and arguments
+  decode_instr(instr, opcode, &arg1, &arg2, &arg3, &flag); // decode the instruction into assembly instructions and arguments
 
   // execute
 
+  switch(opcode){
+    case 1: // add
+      execute_add(instr, arg1, arg2, arg3, flag);
+      break;
+    case 5: // and
+      break;
+    case 0: // br
+      break;
+    case 12: // jmp or ret
+      break;
+    case 4: // jsrr or jsr
+      break;
+    case 2: // ldb BYTE
+      break;
+    case 6: // ldw WORD
+      break;
+    case 14: // lea
+      break;
+    case 9: // not or xor
+      break;
+    case 8: // rti not implemented
+      break;
+    case 13: // shift
+      break;
+    case 3: // stb BYTE
+      break;
+    case 7: // stw WORD
+      break;
+    case 15: // trap
+      break; 
+  } 
 
-
-
-    
    //update
   
 
@@ -440,22 +495,23 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
 }
 
 
-
-
-void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3){
+void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3, int *real_flag){
   ///decode: from machine code to assembly instructions 
   int arg1 = 0;
   int arg2 = 0;
   int arg3 = 0;
+  int flag = -1;
  
   switch(opcode){
     case 1: // add
       if ((instr & 0x0020) == 0){ // if bit 5 is 0, then we are using register mode
         // dr sr1 sr2
+        flag = 0; 
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x00007);
       } else { // immediate mode
+        flag = 1; 
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x0001F); // imm5
@@ -464,10 +520,12 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
     case 5: // and
       if((instr & 0x0020) == 0){ // if bit 5 is 0, then we are using register mode
         // dr sr1 sr2
+        flag = 0; 
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x00007);
       } else { // immediate mode
+        flag = 1; 
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x0001F); // imm5
@@ -484,11 +542,13 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
         arg1 = (instr & 0x01C0) >> 6; 
       }
       break;
-    case 4: // jsr
+    case 4:
       if((instr & 0x0800) == 0){ 
-        arg1 = (instr & 0x01FF); 
-      } else { // jsrr
-        arg1 = (instr & 0x01C0) >> 6; 
+        flag = 0; 
+        arg1 = (instr & 0x01C0) >> 6; //jsrr
+      } else { // jsr
+        flag = 1; 
+        arg1 = (instr & 0x01FF);  
       }
       break;
     case 2: // ldb BYTE
@@ -507,10 +567,12 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
       break;
     case 9: // not or xor
       if((instr & 0x0020 ) == 0){ // xor with two source registers
+        flag = 0; 
         arg1 = (instr & 0x00E00) >> 9;
         arg2 = (instr & 0x001C0) >> 6;
         arg3 = (instr & 0x00007);
       }else{
+        flag = 1; 
         arg1 = (instr & 0x00E00) >> 9;
         arg2 = (instr & 0x001C0) >> 6;
         arg3 = (instr & 0x0001F); // imm5. can be 11111 if not instr
@@ -519,14 +581,17 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
     // rti not implemented bc programs wont use :)
     case 13: // shift
       if((instr & 0x0030) == 0){ // lshf
+        flag = 0;
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x000F); 
       } else if((instr & 0x0030) == 16){ // rshfl
+        flag = 1;
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x000F); 
       } else { // rshfa
+        flag = 3; 
         arg1 = (instr & 0x00E00) >> 9; 
         arg2 = (instr & 0x001C0) >> 6; 
         arg3 = (instr & 0x000F); 
@@ -551,4 +616,54 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
   *real_arg2 = arg2;
   *real_arg3 = arg3;
   return; 
+}
+
+int SEXT5(int val){
+  return (val & 0x10) ? (val | 0xFFE0) : (val & 0x001F);
+}
+
+
+int SEXT6(int val){
+  return (val & 0x20) ? (val | 0xFFC0) : (val & 0x003F);
+}
+
+
+int SEXT9(int val){
+  return (val & 0x100) ? (val | 0xFE00) : (val & 0x01FF);
+}
+int SEXT11(int val){
+  return (val & 0x400) ? (val | 0xF800) : (val & 0x07FF);
+}
+
+
+void update_cc(int val){
+  val = Low16bits(val);
+  if(val < 0){
+    NEXT_LATCHES.N = 1;
+    NEXT_LATCHES.Z = 0;
+    NEXT_LATCHES.P = 0;
+  } else if(val == 0){
+    NEXT_LATCHES.N = 0;
+    NEXT_LATCHES.Z = 1;
+    NEXT_LATCHES.P = 0;
+  } else {
+    NEXT_LATCHES.N = 0;
+    NEXT_LATCHES.Z = 0;
+    NEXT_LATCHES.P = 1;
+  }
+}
+
+
+// args are register number like the actual 0, 1 etc
+// dont need pointers since were not changing the args just the actual memory
+void execute_add(int instr, int dr, int sr1, int op2, int flag){
+  // add dr, sr1, op2
+  if (flag == 0){ // reg mode
+    NEXT_LATCHES.REGS[dr] = LowBits(CURRENT_LATCHES.REGS[sr1] + CURRENT_LATCHES.REGS[op2]);
+    update_cc(NEXT_LATCHES.REGS[dr]);
+  } else { // imm mode
+    int imm5 = SEXT5(op2);
+    NEXT_LATCHES.REGS[dr] = LowBits(CURRENT_LATCHES.REGS[sr1] + imm5);
+    update_cc(NEXT_LATCHES.REGS[dr]);
+  }
 }
