@@ -402,7 +402,7 @@ int main(int argc, char *argv[]) {
 
 /***************************************************************/
 
-void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3);
+void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3, int *real_flag);
 
 int SEXT5(int val);
 int SEXT6(int val);
@@ -437,7 +437,7 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
   //fetch
   int ii = CURRENT_LATCHES.PC >> 1; //bc memory is word addressable BUT PC IS BYTE ADDRESSABLE, we need to shift right by 1 to get the word address
   // pc incremented in fetch stage
-  NEXT_LATCHES.PC = CURRENT_LATCHES.PC + 2; 
+  NEXT_LATCHES.PC = LowBits(CURRENT_LATCHES.PC + 2); 
 
   int instr = 0; 
   // little endian!! 0 = lsb 1 = msb
@@ -621,6 +621,7 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
   *real_arg1 = arg1;
   *real_arg2 = arg2;
   *real_arg3 = arg3;
+  *real_flag = flag;
   return; 
 }
 
@@ -631,6 +632,10 @@ int SEXT5(int val){
 
 int SEXT6(int val){
   return (val & 0x20) ? (val | 0xFFC0) : (val & 0x003F);
+}
+
+int SEX8(int val){
+  return (val & 0x80) ? (val | 0xFF00) : (val & 0x00FF);
 }
 
 
@@ -688,7 +693,7 @@ void execute_branch(int arg1, int pc_offset){
   int ben = (n & CURRENT_LATCHES.N) | (z & CURRENT_LATCHES.Z) | (p & CURRENT_LATCHES.P);
   if(ben){
     // pc <- pc + lshf(off9,1) lshf bc we need to multiply by 2 since label for offset is based on address, not pc value
-    NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.PC + (SEXT9(pc_offset) << 1));
+    NEXT_LATCHES.PC = Low16bits(NEXT_LATCHES.PC + (SEXT9(pc_offset) << 1)); // since we alr incremented pc
   }
   // else pc has already been incremented, we r good
 }
@@ -707,11 +712,11 @@ void execute_jsr(int arg1, int flag){
 	    PC = PC† + LSHF(SEXT(PCoffset11), 1);
 	R7 = TEMP;
 	
-	* PC†: incremented PC
+	where PC†: incremented PC
 */
-int temp = Low16bits(CURRENT_LATCHES.PC);
+int temp = Low16bits(NEXT_LATCHES.PC);
   if(flag){ // jsr
-    NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.PC + (SEXT11(arg1) << 1)); // arg1 = pcoffset11
+    NEXT_LATCHES.PC = Low16bits(NEXT_LATCHES.PC + (SEXT11(arg1) << 1)); // arg1 = pcoffset11, alr incremented pc in fetch 
   } else { // jsrr
     NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.REGS[arg1]); // arg1 = base reg
   }
@@ -776,7 +781,6 @@ void execute_stb(int sr, int baser, int offset){
   int val = CURRENT_LATCHES.REGS[sr] & 0xFF; // get lower BYTE
   MEMORY[addr >> 1][addr & 0x01] = val; 
   // addr/2 bc memory is word addressable and then lsb of addr chooses which byte of the word to store into
-  update_cc(val); 
 }
 
 void execute_stw(int sr, int baser, int offset){
@@ -784,7 +788,6 @@ void execute_stw(int sr, int baser, int offset){
   int val = CURRENT_LATCHES.REGS[sr];
   MEMORY[addr >> 1][0] = val & 0xFF; // store lower byte
   MEMORY[addr >> 1][1] = (val >> 8) & 0xFF; // store upper byte
-  update_cc(val);
 }
 
 void execute_trap(int trap_vector){
@@ -793,6 +796,6 @@ void execute_trap(int trap_vector){
   int vector_table_addr = SEXT8(trap_vector) << 1; // multiply by 2 to get word address
   int routine_addr = ((MEMORY[vector_table_addr >> 1][1] & 0xFF) << 8) | (MEMORY[vector_table_addr >> 1][0] & 0xFF); // get both bytes
   NEXT_LATCHES.PC = Low16bits(routine_addr); // jump to routine
-  update_cc(NEXT_LATCHES.PC); // update cc based on new pc
+  update_cc(NEXT_LATCHES.PC); // update cc based on new pc33
 
 }
