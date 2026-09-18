@@ -402,8 +402,6 @@ int main(int argc, char *argv[]) {
 
 /***************************************************************/
 
-#define Low16bits(x) ((x) & 0xFFFF)
-
 void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3);
 
 int SEXT5(int val);
@@ -412,20 +410,19 @@ int SEXT9(int val);
 int SEXT11(int val);
 void update_cc(int val);
 
-void execute_add(int instr, int arg1, int arg2, int arg3);
-void execute_and(int instr, int arg1, int arg2, int arg3);
-void execute_not(int arg1, int arg2);
-void execute_xor(int arg1, int arg2, int arg3);
-void execute_shift(int instr, int arg1, int arg2, int amount);
-void execute_branch(int condition_mask, int offset);
+void execute_add(int instr, int dr, int sr1, int op2, int flag);
+void execute_and(int instr, int dr, int sr1, int op2, int flag); 
+void execute_branch(int arg1, int pc_offset);
 void execute_jump(int base_register);
-void execute_jsr(int instr, int base_register_or_offset);
-void execute_ldb(int destination, int base_register, int offset);
-void execute_ldw(int destination, int base_register, int offset);
-void execute_stb(int source, int base_register, int offset);
-void execute_stw(int source, int base_register, int offset);
-void execute_lea(int destination, int offset);
-void execute_trap(int trap_vector);
+void execute_jsr(int arg1, int flag);
+void execute_ldb(int dr, int baser, int offset); 
+void execute_ldw(int dr, int baser, int offset);
+void execute_lea(int dr, int pcoffset);
+void execute_xor(int dr, int sr1, int op2, int flag);
+void execute_shift(int dr, int sr, int amount, int flag); 
+void execute_stb(int sr, int baser, int offset); 
+void execute_stw(int sr, int baser, int offset); 
+void execute_trap(int trap_vector); 
 
 void process_instruction(){ // runs once every cycle, runs per new instruction
   /*  function: process_instruction
@@ -461,36 +458,45 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
       execute_add(instr, arg1, arg2, arg3, flag);
       break;
     case 5: // and
+      execute_and(instr, arg1, arg2, arg3, flag);
       break;
     case 0: // br
+      execute_branch(arg1, arg2);
       break;
     case 12: // jmp or ret
+      execute_jump(arg1);
       break;
     case 4: // jsrr or jsr
+      execute_jsr(arg1, flag);
       break;
     case 2: // ldb BYTE
+      execute_ldb(arg1, arg2, arg3);
       break;
     case 6: // ldw WORD
+      execute_ldw(arg1, arg2, arg3);
       break;
     case 14: // lea
+      execute_lea(arg1, arg2);
       break;
     case 9: // not or xor
+      execute_xor(arg1, arg2, arg3, flag);
       break;
     case 8: // rti not implemented
       break;
     case 13: // shift
+      execute_shift(instr, arg1, arg2, arg3);
       break;
     case 3: // stb BYTE
+      execute_stb(arg1, arg2, arg3);
       break;
     case 7: // stw WORD
+      execute_stw(arg1, arg2, arg3);
       break;
     case 15: // trap
+      execute_trap(arg1);
       break; 
   } 
-
-   //update
-  
-
+  //updating next latches is done in the execute functions and cycle automatically to the next latches
 
 }
 
@@ -655,15 +661,138 @@ void update_cc(int val){
 
 
 // args are register number like the actual 0, 1 etc
-// dont need pointers since were not changing the args just the actual memory
+// dont need pointers since were not changing the args just the actual memory which is global
 void execute_add(int instr, int dr, int sr1, int op2, int flag){
   // add dr, sr1, op2
-  if (flag == 0){ // reg mode
-    NEXT_LATCHES.REGS[dr] = LowBits(CURRENT_LATCHES.REGS[sr1] + CURRENT_LATCHES.REGS[op2]);
-    update_cc(NEXT_LATCHES.REGS[dr]);
-  } else { // imm mode
-    int imm5 = SEXT5(op2);
-    NEXT_LATCHES.REGS[dr] = LowBits(CURRENT_LATCHES.REGS[sr1] + imm5);
-    update_cc(NEXT_LATCHES.REGS[dr]);
+  int op1_val = CURRENT_LATCHES.REGS[sr1];
+  int op2_val = flag ? SEXT5(op2) : CURRENT_LATCHES.REGS[op2]; // flag = 0 means reg mode
+  int res = Low16bits(op1_val + op2_val);
+  NEXT_LATCHES.REGS[dr] = res;
+  update_cc(res);
+}
+
+void execute_and(int instr, int dr, int sr1, int op2, int flag){
+  // and dr, sr1, op2
+  int op1_val = CURRENT_LATCHES.REGS[sr1];
+  int op2_val = flag ? SEXT5(op2) : CURRENT_LATCHES.REGS[op2];
+  int res = Low16bits(op1_val & op2_val);
+  NEXT_LATCHES.REGS[dr] = res;
+  update_cc(res);
+}
+
+void execute_branch(int arg1, int pc_offset){
+  // arg1 = nzp bits, arg2 = pc offset
+  int n = (arg1 >> 2) & 0x01; 
+  int z = (arg1 >> 1) & 0x01;
+  int p = arg1 & 0x01;
+  int ben = (n & CURRENT_LATCHES.N) | (z & CURRENT_LATCHES.Z) | (p & CURRENT_LATCHES.P);
+  if(ben){
+    // pc <- pc + lshf(off9,1) lshf bc we need to multiply by 2 since label for offset is based on address, not pc value
+    NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.PC + (SEXT9(pc_offset) << 1));
   }
+  // else pc has already been incremented, we r good
+}
+
+void execute_jump(int base_register){// jmp or ret. if ret, then base reg will =7
+  NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.REGS[base_register]);
+}
+
+void execute_jsr(int arg1, int flag){
+  /*
+  In Appendix A, please correct the operation of the JSR/JSRR instruction to read:
+	TEMP = PC†
+	if (bit(11)==0)
+	    PC = BaseR;
+	else
+	    PC = PC† + LSHF(SEXT(PCoffset11), 1);
+	R7 = TEMP;
+	
+	* PC†: incremented PC
+*/
+int temp = Low16bits(CURRENT_LATCHES.PC);
+  if(flag){ // jsr
+    NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.PC + (SEXT11(arg1) << 1)); // arg1 = pcoffset11
+  } else { // jsrr
+    NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.REGS[arg1]); // arg1 = base reg
+  }
+  NEXT_LATCHES.REGS[7] = temp; // so you can jump back
+}
+
+void execute_ldb(int dr, int baser, int offset){
+  // DR = SEXT(mem[BaseR + SEXT(boffset6)]);
+  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + SEXT6(offset)); 
+  int val = MEMORY[addr >> 1][addr & 0x01]; 
+  // addr/2 bc memory is word addressable and then lsb of addr chooses which byte of the word
+  val = SEXT8(val); // sign extend the byte to 16 bits
+  NEXT_LATCHES.REGS[dr] = val;
+  update_cc(val);
+}
+
+void execute_ldw(int dr, int baser, int offset){
+  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + SEXT6(offset));
+  int val = ((MEMORY[addr >> 1][1] & 0xFF) << 8) | (MEMORY[addr >> 1][0] & 0xFF); // get both bytes
+  NEXT_LATCHES.REGS[dr] = val;
+  update_cc(val);
+}
+
+void execute_lea(int dr, int pcoffset){
+  // offset is memory addr, needs to x2
+  int addr = Low16bits(CURRENT_LATCHES.PC + (SEXT9(pcoffset) << 1));
+  NEXT_LATCHES.REGS[dr] = addr; // the dr gets an address not a value for lea
+  // doc says lea does not set cc
+}
+void execute_xor(int dr, int sr1, int op2, int flag){
+  int op1_val = CURRENT_LATCHES.REGS[sr1];
+  int op2_val = flag ? SEXT5(op2) : CURRENT_LATCHES.REGS[op2]; // flag = 0 means reg mode
+  // if not, then imm5= 11111
+  int res = Low16bits(op1_val ^ op2_val);
+  NEXT_LATCHES.REGS[dr] = res;
+  update_cc(res);
+}
+
+void execute_shift(int dr, int sr, int amount, int flag){
+  // flag = 0 lshf, 1 rshfl, 3 rshfa
+  int val = CURRENT_LATCHES.REGS[sr];
+  int res;
+  if(flag == 0){ // lshf
+    res = Low16bits(val << amount);
+  } else if(flag == 1){ // rshfl
+    res = Low16bits(val >> amount);
+  } else { // rshfa
+    // arithmetic shift right: preserve sign bit
+    if(val & 0x8000){ // if msb = 1 val is negative
+      res = (val >> amount) | (0xFFFF << (16 - amount)); // fill in with 1s on the left empty sides
+    } else {
+      res = val >> amount;
+    }
+    res = Low16bits(res);
+  }
+  NEXT_LATCHES.REGS[dr] = res;
+  update_cc(res);
+}
+
+void execute_stb(int sr, int baser, int offset){
+  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + SEXT6(offset));
+  int val = CURRENT_LATCHES.REGS[sr] & 0xFF; // get lower BYTE
+  MEMORY[addr >> 1][addr & 0x01] = val; 
+  // addr/2 bc memory is word addressable and then lsb of addr chooses which byte of the word to store into
+  update_cc(val); 
+}
+
+void execute_stw(int sr, int baser, int offset){
+  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + SEXT6(offset));
+  int val = CURRENT_LATCHES.REGS[sr];
+  MEMORY[addr >> 1][0] = val & 0xFF; // store lower byte
+  MEMORY[addr >> 1][1] = (val >> 8) & 0xFF; // store upper byte
+  update_cc(val);
+}
+
+void execute_trap(int trap_vector){
+  NEXT_LATCHES.REGS[7] = Low16bits(NEXT_LATCHES.PC); // load with incremented pc
+  // trap vector is 8 bits, gives addr of routine 
+  int vector_table_addr = SEXT8(trap_vector) << 1; // multiply by 2 to get word address
+  int routine_addr = ((MEMORY[vector_table_addr >> 1][1] & 0xFF) << 8) | (MEMORY[vector_table_addr >> 1][0] & 0xFF); // get both bytes
+  NEXT_LATCHES.PC = Low16bits(routine_addr); // jump to routine
+  update_cc(NEXT_LATCHES.PC); // update cc based on new pc
+
 }
