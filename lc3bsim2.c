@@ -424,7 +424,8 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
   int arg1;
   int arg2;
   int arg3;
-  decode_instr(instr, &arg1, &arg2, &arg3); // decode the instruction into assembly instructions and arguments
+  int opcode = (instr >> 12) & 0xF;
+  decode_instr(instr, opcode, &arg1, &arg2, &arg3); // decode the instruction into assembly instructions and arguments
 
   // execute
 
@@ -441,9 +442,8 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
 
 
 
-void decode_instr(int instr, int *real_arg1, int *real_arg2, int *real_arg3){
-  ///decode: from machine code to assembly instructions
-  int opcode = instr & 0x0F000; 
+void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *real_arg3){
+  ///decode: from machine code to assembly instructions 
   int arg1 = 0;
   int arg2 = 0;
   int arg3 = 0;
