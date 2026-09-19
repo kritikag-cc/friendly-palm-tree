@@ -437,7 +437,7 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
   //fetch
   int ii = CURRENT_LATCHES.PC >> 1; //bc memory is word addressable BUT PC IS BYTE ADDRESSABLE, we need to shift right by 1 to get the word address
   // pc incremented in fetch stage
-  NEXT_LATCHES.PC = LowBits(CURRENT_LATCHES.PC + 2); 
+  NEXT_LATCHES.PC = Low16bits(CURRENT_LATCHES.PC + 2); 
 
   int instr = 0; 
   // little endian!! 0 = lsb 1 = msb
@@ -484,7 +484,7 @@ void process_instruction(){ // runs once every cycle, runs per new instruction
     case 8: // rti not implemented
       break;
     case 13: // shift
-      execute_shift(instr, arg1, arg2, arg3);
+      execute_shift(arg1, arg2, arg3, flag); 
       break;
     case 3: // stb BYTE
       execute_stb(arg1, arg2, arg3);
@@ -513,13 +513,13 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
       if ((instr & 0x0020) == 0){ // if bit 5 is 0, then we are using register mode
         // dr sr1 sr2
         flag = 0; 
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
-        arg3 = (instr & 0x00007);
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
+        arg3 = (instr & 0x07);
       } else { // immediate mode
         flag = 1; 
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
         arg3 = (instr & 0x0001F); // imm5
       }
       break;
@@ -527,91 +527,91 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
       if((instr & 0x0020) == 0){ // if bit 5 is 0, then we are using register mode
         // dr sr1 sr2
         flag = 0; 
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
         arg3 = (instr & 0x00007);
       } else { // immediate mode
         flag = 1; 
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
         arg3 = (instr & 0x0001F); // imm5
       }
       break;
     case 0: // br
-      arg1 = (instr & 0x0E00) >> 9; // n,z,p
+      arg1 = (instr >> 9) & 0x07; // n,z,p
       arg2 = (instr & 0x01FF); // pc offset
       break;
     case 12: // jmp or ret
-      if((instr & 0x01C0) == 0){ // ret
+      if(((instr >> 6) & 0x7) == 0){ // ret
         arg1 = 7; 
       } else { // jmp
-        arg1 = (instr & 0x01C0) >> 6; 
+        arg1 = (instr >> 6) & 0x07;
       }
       break;
     case 4:
       if((instr & 0x0800) == 0){ 
         flag = 0; 
-        arg1 = (instr & 0x01C0) >> 6; //jsrr
-      } else { // jsr
+        arg1 = (instr >> 6) & 0x07; //jsrr - register
+      } else { 
         flag = 1; 
-        arg1 = (instr & 0x01FF);  
+        arg1 = (instr & 0x07FF);  //jsr - offset
       }
       break;
     case 2: // ldb BYTE
-      arg1 = (instr & 0x00E00) >> 9; 
-      arg2 = (instr & 0x001C0) >> 6; 
+      arg1 = (instr >> 9) & 0x07; 
+      arg2 = (instr >> 6) & 0x07; 
       arg3 = (instr & 0x0003F); 
       break;
     case 6: // ldw WORD
-      arg1 = (instr & 0x00E00) >> 9; 
-      arg2 = (instr & 0x001C0) >> 6; 
-      arg3 = (instr & 0x0001FF); 
+      arg1 = (instr >> 9) & 0x07; 
+      arg2 = (instr >> 6) & 0x07; 
+      arg3 = (instr & 0x003F);
       break;
     case 14: // lea
-      arg1 = (instr & 0x00E00) >> 9;
+      arg1 = (instr >> 9) & 0x07;
       arg2 = (instr & 0x01FF); 
       break;
     case 9: // not or xor
       if((instr & 0x0020 ) == 0){ // xor with two source registers
         flag = 0; 
-        arg1 = (instr & 0x00E00) >> 9;
-        arg2 = (instr & 0x001C0) >> 6;
-        arg3 = (instr & 0x00007);
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
+        arg3 = (instr & 0x0007);
       }else{
         flag = 1; 
-        arg1 = (instr & 0x00E00) >> 9;
-        arg2 = (instr & 0x001C0) >> 6;
-        arg3 = (instr & 0x0001F); // imm5. can be 11111 if not instr
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
+        arg3 = (instr & 0x001F); // imm5. can be 11111 if not instr
       }
       break;
     // rti not implemented bc programs wont use :)
     case 13: // shift
       if((instr & 0x0030) == 0){ // lshf
         flag = 0;
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
         arg3 = (instr & 0x000F); 
       } else if((instr & 0x0030) == 16){ // rshfl
         flag = 1;
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
         arg3 = (instr & 0x000F); 
       } else { // rshfa
         flag = 3; 
-        arg1 = (instr & 0x00E00) >> 9; 
-        arg2 = (instr & 0x001C0) >> 6; 
+        arg1 = (instr >> 9) & 0x07;
+        arg2 = (instr >> 6) & 0x07;
         arg3 = (instr & 0x000F); 
       }
       break;
     case 3: // stb BYTE
-      arg1 = (instr & 0x00E00) >> 9;
-      arg2 = (instr & 0x001C0) >> 6;
+      arg1 = (instr >> 9) & 0x07;
+      arg2 = (instr >> 6) & 0x07;
       arg3 = (instr & 0x0003F); 
       break;
     case 7: // stw WORD
-      arg1 = (instr & 0x00E00) >> 9;
-      arg2 = (instr & 0x001C0) >> 6;
-      arg3 = (instr & 0x0001FF);
+      arg1 = (instr >> 9) & 0x07;
+      arg2 = (instr >> 6) & 0x07;
+      arg3 = (instr & 0x003F);
       break;
     case 15: // trap
       arg1 = (instr & 0x00FF); // 8 bit trap vector 
@@ -627,6 +627,7 @@ void decode_instr(int instr, int opcode, int *real_arg1, int *real_arg2, int *re
 
 int SEXT5(int val){
   return (val & 0x10) ? (val | 0xFFE0) : (val & 0x001F);
+  // if bit 5 = 1, then or to get 1 in upper bits. otherwise, 0 out upper bits
 }
 
 
@@ -634,7 +635,7 @@ int SEXT6(int val){
   return (val & 0x20) ? (val | 0xFFC0) : (val & 0x003F);
 }
 
-int SEX8(int val){
+int SEXT8(int val){
   return (val & 0x80) ? (val | 0xFF00) : (val & 0x00FF);
 }
 
@@ -642,6 +643,7 @@ int SEX8(int val){
 int SEXT9(int val){
   return (val & 0x100) ? (val | 0xFE00) : (val & 0x01FF);
 }
+
 int SEXT11(int val){
   return (val & 0x400) ? (val | 0xF800) : (val & 0x07FF);
 }
@@ -649,7 +651,7 @@ int SEXT11(int val){
 
 void update_cc(int val){
   val = Low16bits(val);
-  if(val < 0){
+  if(val & 0x8000){ // if msb = 1 val is negative
     NEXT_LATCHES.N = 1;
     NEXT_LATCHES.Z = 0;
     NEXT_LATCHES.P = 0;
@@ -734,7 +736,7 @@ void execute_ldb(int dr, int baser, int offset){
 }
 
 void execute_ldw(int dr, int baser, int offset){
-  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + SEXT6(offset));
+  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + (SEXT6(offset) << 1));
   int val = ((MEMORY[addr >> 1][1] & 0xFF) << 8) | (MEMORY[addr >> 1][0] & 0xFF); // get both bytes
   NEXT_LATCHES.REGS[dr] = val;
   update_cc(val);
@@ -742,7 +744,7 @@ void execute_ldw(int dr, int baser, int offset){
 
 void execute_lea(int dr, int pcoffset){
   // offset is memory addr, needs to x2
-  int addr = Low16bits(CURRENT_LATCHES.PC + (SEXT9(pcoffset) << 1));
+  int addr = Low16bits(NEXT_LATCHES.PC + (SEXT9(pcoffset) << 1));
   NEXT_LATCHES.REGS[dr] = addr; // the dr gets an address not a value for lea
   // doc says lea does not set cc
 }
@@ -784,7 +786,7 @@ void execute_stb(int sr, int baser, int offset){
 }
 
 void execute_stw(int sr, int baser, int offset){
-  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + SEXT6(offset));
+  int addr = Low16bits(CURRENT_LATCHES.REGS[baser] + (SEXT6(offset) << 1));
   int val = CURRENT_LATCHES.REGS[sr];
   MEMORY[addr >> 1][0] = val & 0xFF; // store lower byte
   MEMORY[addr >> 1][1] = (val >> 8) & 0xFF; // store upper byte
@@ -793,9 +795,7 @@ void execute_stw(int sr, int baser, int offset){
 void execute_trap(int trap_vector){
   NEXT_LATCHES.REGS[7] = Low16bits(NEXT_LATCHES.PC); // load with incremented pc
   // trap vector is 8 bits, gives addr of routine 
-  int vector_table_addr = SEXT8(trap_vector) << 1; // multiply by 2 to get word address
+  int vector_table_addr = ((trap_vector & 0x00FF) << 1); // multiply by 2 to get word address. need to zero extend the tra p vector
   int routine_addr = ((MEMORY[vector_table_addr >> 1][1] & 0xFF) << 8) | (MEMORY[vector_table_addr >> 1][0] & 0xFF); // get both bytes
   NEXT_LATCHES.PC = Low16bits(routine_addr); // jump to routine
-  update_cc(NEXT_LATCHES.PC); // update cc based on new pc33
-
 }
